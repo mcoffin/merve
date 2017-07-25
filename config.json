@@ -1,0 +1,15 @@
+{
+    "harbaror": {
+        "port": 8080,
+        "matches": [
+            {
+                "query": "name",
+                "pattern": "^.*harbaror.*$"
+            },
+            {
+                "query": "state",
+                "pattern": "^TASK_RUNNING$"
+            }
+        ]
+    }
+}
