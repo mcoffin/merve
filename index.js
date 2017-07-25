@@ -2,8 +2,15 @@ const _ = require('lodash');
 const Lazy = require('lazy.js');
 const fs = require('fs');
 const { URL } = require('url');
+const ZooKeeper = require('zookeeper');
+const { PromiseZooKeeper } = require('./lib/zookeeper');
 
 const args = require('minimist')(process.argv);
+
+const zk = new ZooKeeper({
+    connect: args.zk,
+    timeout: 5000
+});
 
 const masterUrl = new URL(args.master);
 const http = require(masterUrl.protocol.replace(':', ''));
@@ -98,8 +105,34 @@ const tasks = new Promise((resolve, reject) => {
     .then(({ body }) => JSON.parse(body))
     .then((body) => readConfig.then(() => body))
     .then(({ tasks }) => getMatches(globalConfig, tasks))
-    .then(JSON.stringify)
-    .then(console.log)
+    .then((services) => {
+        const clientPromise = new Promise((resolve, reject) => {
+            zk.connect((err, client) => {
+                if (err) {
+                    return reject(err);
+                } else {
+                    return resolve(client);
+                }
+            });
+        })
+            .then(client => new PromiseZooKeeper(client));
+        const zkPromises = Lazy(services).pairs().map(([ service, nodes ]) => {
+            return clientPromise
+                .then(client => {
+                    return client.mkdirp(`/nerve/${service}`)
+                        .then(() => {
+                            const nodePromises = Lazy(nodes).map(node => {
+                                return client.createOrUpdate(`/nerve/${service}/${node.name}`, JSON.stringify(node));
+                            }).toArray();
+                            return Promise.all(nodePromises);
+                        });
+                })
+        }).toArray();
+        return Promise.all(zkPromises)
+            .then(() => clientPromise)
+            .then((client) => client.close());
+    })
+    .then(() => console.log("success"))
     .catch((e) => {
         if (e instanceof Error) {
             console.error(e.stack);
